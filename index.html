@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>汉字防守战 - Pinyin Defender</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 90vh;
+            background-color: #1e293b;
+            border: 4px solid #38bdf8;
+            border-radius: 12px;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.5);
+            overflow: hidden;
+        }
+
+        #ui-bar {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            padding: 15px 20px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: space-between;
+            font-size: 24px;
+            background-color: rgba(15, 23, 42, 0.8);
+            z-index: 10;
+        }
+
+        #hearts { color: #ef4444; }
+        #score { color: #34d399; font-weight: bold; }
+
+        #typing-area {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #0f172a;
+            border: 2px solid #38bdf8;
+            padding: 10px 30px;
+            border-radius: 8px;
+            font-size: 28px;
+            color: #f8fafc;
+            min-width: 200px;
+            text-align: center;
+            min-height: 40px;
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+            z-index: 10;
+        }
+
+        .falling-word {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            /* 基础下落动画只控制 top，保证 transform 独立用于爆破 */
+            transition: top 0.02s linear; 
+        }
+
+        .chinese-char {
+            font-size: 40px;
+            font-weight: bold;
+            color: #f8fafc;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+            transition: all 0.2s;
+        }
+
+        .pinyin-display {
+            font-size: 24px;
+            color: #38bdf8;
+            min-height: 30px;
+            margin-top: 5px;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        .locked .chinese-char {
+            color: #facc15;
+            text-shadow: 0 0 15px rgba(250, 204, 21, 0.8);
+        }
+
+        .locked .pinyin-display {
+            color: #facc15;
+        }
+
+        /* 爆破效果 CSS */
+        .explode {
+            transform: scale(1.6);
+            opacity: 0;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s ease-out;
+            pointer-events: none;
+        }
+        .explode .chinese-char, .explode .pinyin-display {
+            color: #34d399 !important; /* 爆破时变成绿色 */
+            text-shadow: 0 0 20px #34d399 !important;
+        }
+
+        /* 子弹效果 CSS */
+        .bullet {
+            position: absolute;
+            width: 4px;
+            height: 25px;
+            background-color: #34d399;
+            box-shadow: 0 0 10px #34d399;
+            border-radius: 2px;
+            pointer-events: none;
+            transition: top 0.15s linear, left 0.15s linear;
+            z-index: 5;
+        }
+
+        .error-msg {
+            position: absolute;
+            color: #ef4444;
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 0 0 5px #000;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s, top 0.5s;
+        }
+
+        #game-over {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        #game-over h1 { color: #ef4444; font-size: 60px; margin-bottom: 10px; }
+        #game-over p { font-size: 30px; margin-bottom: 30px; }
+        button {
+            padding: 15px 30px; font-size: 24px;
+            background-color: #38bdf8; color: #0f172a;
+            border: none; border-radius: 8px; cursor: pointer; font-weight: bold;
+        }
+        button:hover { background-color: #7dd3fc; }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="ui-bar">
+            <div id="score">Score: 0</div>
+            <div id="hearts">❤️❤️❤️❤️❤️</div>
+        </div>
+        
+        <div id="word-area"></div>
+        <div id="typing-area"></div>
+
+        <div id="game-over">
+            <h1>Game Over</h1>
+            <p>Your Score: <span id="final-score">0</span></p>
+            <button onclick="startGame()">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        const vocabData = [
+            { word: "度过", keys: "duguo", display: ["d", "dù", "dù g", "dù gu", "dù guò"] },
+            { word: "度假", keys: "dujia", display: ["d", "dù", "dù j", "dù ji", "dù jià"] },
+            { word: "车辆", keys: "cheliang", display: ["c", "ch", "chē", "chē l", "chē li", "chē lia", "chē liàng"] },
+            { word: "一辆车", keys: "yiliangche", display: ["y", "yí", "yí l", "yí li", "yí lia", "yí liàng", "yí liàng c", "yí liàng ch", "yí liàng chē"] },
+            { word: "推车", keys: "tuiche", display: ["t", "tu", "tuī", "tuī c", "tuī ch", "tuī chē"] },
+            { word: "托运", keys: "tuoyun", display: ["t", "tu", "tuō", "tuō y", "tuō yu", "tuō yùn"] },
+            { word: "免税", keys: "mianshui", display: ["m", "mi", "mia", "miǎn", "miǎn s", "miǎn sh", "miǎn shu", "miǎn shuì"] },
+            { word: "交税", keys: "jiaoshui", display: ["j", "ji", "jia", "jiāo", "jiāo s", "jiāo sh", "jiāo shu", "jiāo shuì"] },
+            { word: "化妆", keys: "huazhuang", display: ["h", "hu", "huà", "huà z", "huà zh", "huà zhu", "huà zhua", "huà zhuāng"] },
+            { word: "复杂", keys: "fuza", display: ["f", "fù", "fù z", "fù zá"] },
+            { word: "杂物", keys: "zawu", display: ["z", "zá", "zá w", "zá wù"] },
+            { word: "表示", keys: "biaoshi", display: ["b", "bi", "bia", "biǎo", "biǎo s", "biǎo sh", "biǎo shì"] },
+            { word: "将要", keys: "jiangyao", display: ["j", "ji", "jia", "jian", "jiāng", "jiāng y", "jiāng ya", "jiāng yào"] },
+            { word: "距离", keys: "juli", display: ["j", "jù", "jù l", "jù lí"] },
+            { word: "播放", keys: "bofang", display: ["b", "bō", "bō f", "bō fa", "bō fan", "bō fàng"] },
+            { word: "广播", keys: "guangbo", display: ["g", "gu", "gua", "guan", "guǎng", "guǎng b", "guǎng bō"] },
+            { word: "乘坐", keys: "chengzuo", display: ["c", "ch", "che", "chen", "chéng", "chéng z", "chéng zu", "chéng zuò"] },
+            { word: "乘客", keys: "chengke", display: ["c", "ch", "che", "chen", "chéng", "chéng k", "chéng kè"] },
+            { word: "整齐", keys: "zhengqi", display: ["z", "zh", "zhe", "zhen", "zhěng", "zhěng q", "zhěng qí"] }
+        ];
+
+        let score = 0;
+        let hearts = 5; // 爱心数量：5个
+        let activeWords = [];
+        let gameInterval;
+        let spawnInterval;
+        let isGameOver = false;
+
+        let lockedWordObj = null; 
+        let currentTypedIndex = 0;
+
+        const maxWordsOnScreen = 3; // 最多3个词语
+        const fallSpeed = 0.5; // 极慢的下落速度
+
+        function startGame() {
+            document.getElementById('game-over').style.display = 'none';
+            document.getElementById('word-area').innerHTML = '';
+            score = 0;
+            hearts = 5;
+            activeWords = [];
+            isGameOver = false;
+            updateUI();
+            clearTypingBox();
+
+            spawnInterval = setInterval(spawnWord, 4500); 
+            gameInterval = setInterval(updateGameLoop, 20); 
+        }
+
+        function clearTypingBox() {
+            if (lockedWordObj && lockedWordObj.element && !lockedWordObj.element.classList.contains('explode')) {
+                lockedWordObj.element.classList.remove('locked');
+            }
+            lockedWordObj = null;
+            currentTypedIndex = 0;
+            document.getElementById('typing-area').innerText = "";
+        }
+
+        function spawnWord() {
+            if (activeWords.length >= maxWordsOnScreen) return;
+
+            const wordData = vocabData[Math.floor(Math.random() * vocabData.length)];
+            const wordEl = document.createElement('div');
+            wordEl.className = 'falling-word';
+            wordEl.style.left = Math.floor(Math.random() * 600) + 50 + 'px'; 
+            wordEl.style.top = '-50px';
+
+            wordEl.innerHTML = `
+                <div class="chinese-char">${wordData.word}</div>
+                <div class="pinyin-display"></div>
+            `;
+
+            document.getElementById('word-area').appendChild(wordEl);
+
+            activeWords.push({
+                element: wordEl,
+                data: wordData,
+                yPos: -50
+            });
+        }
+
+        function updateGameLoop() {
+            const containerHeight = document.getElementById('game-container').clientHeight;
+
+            for (let i = activeWords.length - 1; i >= 0; i--) {
+                let wordObj = activeWords[i];
+                wordObj.yPos += fallSpeed;
+                wordObj.element.style.top = wordObj.yPos + 'px';
+
+                if (wordObj.yPos > containerHeight - 60) {
+                    loseHeart();
+                    wordObj.element.remove();
+                    activeWords.splice(i, 1);
+                    clearTypingBox(); // 漏词后自动清空打字框
+                }
+            }
+        }
+
+        function loseHeart() {
+            hearts--;
+            updateUI();
+            if (hearts <= 0) gameOver();
+        }
+
+        function updateUI() {
+            document.getElementById('score').innerText = `Score: ${score}`;
+            document.getElementById('hearts').innerText = '❤️'.repeat(hearts);
+        }
+
+        function gameOver() {
+            isGameOver = true;
+            clearInterval(gameInterval);
+            clearInterval(spawnInterval);
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('game-over').style.display = 'flex';
+        }
+
+        function showErrorMsg(element) {
+            const errorMsg = document.createElement('div');
+            errorMsg.className = 'error-msg';
+            errorMsg.innerText = 'No Target Found!';
+            
+            const rect = element.getBoundingClientRect();
+            const containerRect = document.getElementById('game-container').getBoundingClientRect();
+            
+            errorMsg.style.left = (rect.left - containerRect.left + 20) + 'px';
+            errorMsg.style.top = (rect.top - containerRect.top + 20) + 'px';
+            
+            document.getElementById('word-area').appendChild(errorMsg);
+            
+            setTimeout(() => {
+                errorMsg.style.opacity = '1';
+                errorMsg.style.top = (rect.top - containerRect.top - 20) + 'px';
+            }, 10);
+
+            setTimeout(() => {
+                errorMsg.style.opacity = '0';
+                setTimeout(() => errorMsg.remove(), 200);
+            }, 600);
+        }
+
+        // 发射子弹效果函数
+        function shootBullet(targetObj) {
+            const container = document.getElementById('game-container');
+            const typingArea = document.getElementById('typing-area');
+            
+            const containerRect = container.getBoundingClientRect();
+            const typingRect = typingArea.getBoundingClientRect();
+            const targetRect = targetObj.element.getBoundingClientRect();
+
+            const bullet = document.createElement('div');
+            bullet.className = 'bullet';
+
+            // 起点：打字框顶部中间
+            const startX = typingRect.left - containerRect.left + typingRect.width / 2 - 2;
+            const startY = typingRect.top - containerRect.top;
+
+            bullet.style.left = startX + 'px';
+            bullet.style.top = startY + 'px';
+            container.appendChild(bullet);
+
+            // 终点：目标词语底部中间
+            const endX = targetRect.left - containerRect.left + targetRect.width / 2 - 2;
+            const endY = targetRect.top - containerRect.top + targetRect.height - 10;
+
+            // 延迟极短时间后改变子弹位置触发动画
+            setTimeout(() => {
+                bullet.style.left = endX + 'px';
+                bullet.style.top = endY + 'px';
+            }, 10);
+
+            // 动画结束后移除子弹
+            setTimeout(() => {
+                bullet.remove();
+            }, 150);
+        }
+
+        window.addEventListener('keydown', function(e) {
+            if (isGameOver) return;
+            const key = e.key.toLowerCase();
+            if (!/^[a-z]$/.test(key)) return;
+
+            if (!lockedWordObj) {
+                let possibleTargets = activeWords.filter(w => w.data.keys[0] === key);
+                
+                if (possibleTargets.length > 0) {
+                    lockedWordObj = possibleTargets.reduce((prev, current) => (prev.yPos > current.yPos) ? prev : current);
+                    lockedWordObj.element.classList.add('locked');
+                    currentTypedIndex = 1;
+                    updateTargetDisplay();
+                    shootBullet(lockedWordObj); // 射击第一发子弹
+                } else {
+                    showErrorMsg(document.getElementById('game-container'));
+                }
+            } else {
+                const targetKey = lockedWordObj.data.keys[currentTypedIndex];
+                
+                if (key === targetKey) {
+                    currentTypedIndex++;
+                    updateTargetDisplay();
+                    shootBullet(lockedWordObj); // 射击子弹
+
+                    // 判断是否整个词打完了
+                    if (currentTypedIndex === lockedWordObj.data.keys.length) {
+                        score += 10;
+                        updateUI();
+                        
+                        const completedWord = lockedWordObj;
+                        
+                        // 从活动列表中移除，这样它就不会继续下落了，停在半空
+                        activeWords = activeWords.filter(w => w !== completedWord);
+                        
+                        // 确保完整的拼音显示出来并触发放大爆破的CSS类
+                        completedWord.element.classList.add('explode');
+                        
+                        // 延迟 400 毫秒后彻底从屏幕上删除元素
+                        setTimeout(() => {
+                            completedWord.element.remove();
+                        }, 400);
+
+                        clearTypingBox(); 
+                    }
+                } else {
+                    showErrorMsg(lockedWordObj.element);
+                }
+            }
+        });
+
+        function updateTargetDisplay() {
+            if (!lockedWordObj) return;
+            const displayString = lockedWordObj.data.display[currentTypedIndex - 1];
+            
+            const pinyinDiv = lockedWordObj.element.querySelector('.pinyin-display');
+            pinyinDiv.innerText = displayString;
+            document.getElementById('typing-area').innerText = displayString;
+        }
+
+        startGame();
+
+    </script>
+</body>
+</html>
